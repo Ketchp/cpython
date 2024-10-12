@@ -303,11 +303,7 @@ class InitialNamesVisitor(GrammarVisitor):
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Set[Any]:
         names: Set[str] = set()
         for value in node:
-            if isinstance(value, list):
-                for item in value:
-                    names |= self.visit(item, *args, **kwargs)
-            else:
-                names |= self.visit(value, *args, **kwargs)
+            names |= self.visit(value, *args, **kwargs)
         return names
 
     def visit_Alt(self, alt: Alt) -> Set[Any]:

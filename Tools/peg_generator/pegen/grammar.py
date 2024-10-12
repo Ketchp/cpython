@@ -26,11 +26,7 @@ class GrammarVisitor:
     def generic_visit(self, node: Iterable[Any], *args: Any, **kwargs: Any) -> Any:
         """Called if no explicit visitor function exists for a node."""
         for value in node:
-            if isinstance(value, list):
-                for item in value:
-                    self.visit(item, *args, **kwargs)
-            else:
-                self.visit(value, *args, **kwargs)
+            self.visit(value, *args, **kwargs)
 
 
 class Grammar:
@@ -151,8 +147,8 @@ class Rhs:
     def __repr__(self) -> str:
         return f"Rhs({self.alts!r})"
 
-    def __iter__(self) -> Iterator[List[Alt]]:
-        yield self.alts
+    def __iter__(self) -> Iterator[Alt]:
+        yield from self.alts
 
     @property
     def can_be_inlined(self) -> bool:
@@ -185,8 +181,8 @@ class Alt:
             args.append(f"action={self.action!r}")
         return f"Alt({', '.join(args)})"
 
-    def __iter__(self) -> Iterator[List[NamedItem]]:
-        yield self.items
+    def __iter__(self) -> Iterator[NamedItem]:
+        yield from self.items
 
 
 class NamedItem:
@@ -306,7 +302,7 @@ class Repeat1(Repeat):
 class Gather(Repeat):
     def __init__(self, separator: Plain, node: Plain):
         self.separator = separator
-        self.node = node
+        super().__init__(node)
 
     def __str__(self) -> str:
         return f"{self.separator!s}.{self.node!s}+"
