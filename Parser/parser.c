@@ -16528,7 +16528,7 @@ dict_rule(Parser *p)
         D(fprintf(stderr, "%*c%s dict[%d-%d]: %s failed!\n", p->level, ' ',
                   p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "'{' double_starred_kvpairs? '}'"));
     }
-    { // '{' invalid_double_starred_kvpairs '}'
+    if (p->call_invalid_rules) { // '{' invalid_double_starred_kvpairs '}'
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -20615,7 +20615,7 @@ invalid_assignment_rule(Parser *p)
     }
     void * _res = NULL;
     int _mark = p->mark;
-    { // invalid_ann_assign_target ':' expression
+    if (p->call_invalid_rules) { // invalid_ann_assign_target ':' expression
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -20858,7 +20858,7 @@ invalid_ann_assign_target_rule(Parser *p)
         D(fprintf(stderr, "%*c%s invalid_ann_assign_target[%d-%d]: %s failed!\n", p->level, ' ',
                   p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "tuple"));
     }
-    { // '(' invalid_ann_assign_target ')'
+    if (p->call_invalid_rules) { // '(' invalid_ann_assign_target ')'
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -21237,7 +21237,7 @@ invalid_parameters_rule(Parser *p)
         D(fprintf(stderr, "%*c%s invalid_parameters[%d-%d]: %s failed!\n", p->level, ' ',
                   p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "(slash_no_default | slash_with_default) param_maybe_default* '/'"));
     }
-    { // slash_no_default? param_no_default* invalid_parameters_helper param_no_default
+    if (p->call_invalid_rules) { // slash_no_default? param_no_default* invalid_parameters_helper param_no_default
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -21828,7 +21828,7 @@ invalid_lambda_parameters_rule(Parser *p)
         D(fprintf(stderr, "%*c%s invalid_lambda_parameters[%d-%d]: %s failed!\n", p->level, ' ',
                   p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "(lambda_slash_no_default | lambda_slash_with_default) lambda_param_maybe_default* '/'"));
     }
-    { // lambda_slash_no_default? lambda_param_no_default* invalid_lambda_parameters_helper lambda_param_no_default
+    if (p->call_invalid_rules) { // lambda_slash_no_default? lambda_param_no_default* invalid_lambda_parameters_helper lambda_param_no_default
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -23904,7 +23904,7 @@ invalid_class_pattern_rule(Parser *p)
     }
     void * _res = NULL;
     int _mark = p->mark;
-    { // name_or_attr '(' invalid_class_argument_pattern
+    if (p->call_invalid_rules) { // name_or_attr '(' invalid_class_argument_pattern
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -24659,7 +24659,7 @@ invalid_double_starred_kvpairs_rule(Parser *p)
     }
     void * _res = NULL;
     int _mark = p->mark;
-    { // ','.double_starred_kvpair+ ',' invalid_kvpair
+    if (p->call_invalid_rules) { // ','.double_starred_kvpair+ ',' invalid_kvpair
         if (p->error_indicator) {
             p->level--;
             return NULL;
@@ -25176,7 +25176,7 @@ invalid_replacement_field_rule(Parser *p)
         D(fprintf(stderr, "%*c%s invalid_replacement_field[%d-%d]: %s failed!\n", p->level, ' ',
                   p->error_indicator ? "ERROR!" : "-", _mark, p->mark, "'{' annotated_rhs '=' !('!' | ':' | '}')"));
     }
-    { // '{' annotated_rhs '='? invalid_conversion_character
+    if (p->call_invalid_rules) { // '{' annotated_rhs '='? invalid_conversion_character
         if (p->error_indicator) {
             p->level--;
             return NULL;
