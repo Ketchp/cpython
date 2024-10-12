@@ -124,20 +124,30 @@ class CCallMakerVisitor(GrammarVisitor):
     def __init__(
         self,
         parser_generator: ParserGenerator,
+        tokens: Dict[int, str],
         exact_tokens: Dict[str, int],
         non_exact_tokens: Set[str],
     ):
         self.gen = parser_generator
+        self.tokens = tokens
         self.exact_tokens = exact_tokens
         self.non_exact_tokens = non_exact_tokens
         self.cache: Dict[str, str] = {}
         self.cleanup_statements: List[str] = []
 
+    def name_to_macro(self, name: str) -> str:
+        name = name.strip('\'"')
+        if name in self.exact_tokens:
+            return self.tokens[self.exact_tokens[name]]
+        if name in self.non_exact_tokens:
+            return name
+        return name + '_token_type'
+
     def keyword_helper(self, keyword: str) -> FunctionCall:
         return FunctionCall(
             assigned_variable="_keyword",
             function="_PyPegen_expect_token",
-            arguments=["p", self.gen.keywords[keyword]],
+            arguments=["p", keyword],
             return_type="Token *",
             nodetype=NodeTypes.KEYWORD,
             comment=f"token='{keyword}'",
@@ -191,16 +201,15 @@ class CCallMakerVisitor(GrammarVisitor):
         val = ast.literal_eval(node.value)
         if re.match(r"[a-zA-Z_]\w*\Z", val):  # This is a keyword
             if node.value.endswith("'"):
-                return self.keyword_helper(val)
+                return self.keyword_helper(self.name_to_macro(val))
             else:
                 return self.soft_keyword_helper(node.value)
         else:
             assert val in self.exact_tokens, f"{node.value} is not a known literal"
-            type = self.exact_tokens[val]
             return FunctionCall(
                 assigned_variable="_literal",
                 function=f"_PyPegen_expect_token",
-                arguments=["p", type],
+                arguments=["p", self.name_to_macro(val)],
                 nodetype=NodeTypes.GENERIC_TOKEN,
                 return_type="Token *",
                 comment=f"token='{val}'",
@@ -372,7 +381,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
     ):
         super().__init__(grammar, set(tokens.values()), file)
         self.callmakervisitor: CCallMakerVisitor = CCallMakerVisitor(
-            self, exact_tokens, non_exact_tokens
+            self, tokens, exact_tokens, non_exact_tokens
         )
         self._varname_counter = 0
         self.debug = debug
@@ -448,6 +457,8 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
             self.print(subheader)
         self._setup_keywords()
         self._setup_soft_keywords()
+        for keyword, type_int in self.keywords.items():
+            self.print(f'#define {keyword}_token_type {type_int}')
         for i, (rulename, rule) in enumerate(self.all_rules.items(), 1000):
             comment = "  // Left-recursive" if rule.left_recursive else ""
             self.print(f"#define {rulename}_type {i}{comment}")
@@ -513,7 +524,7 @@ class CParserGenerator(ParserGenerator, GrammarVisitor):
         self.print("static char *soft_keywords[] = {")
         with self.indent():
             for keyword in soft_keywords:
-                self.print(f'"{keyword}",')
+                self.print(f'{keyword},')
             self.print("NULL,")
         self.print("};")
 

@@ -229,7 +229,8 @@ class PythonParserGenerator(ParserGenerator, GrammarVisitor):
         self.print()
         with self.indent():
             self.print(f"KEYWORDS = {tuple(self.keywords)}")
-            self.print(f"SOFT_KEYWORDS = {tuple(self.soft_keywords)}")
+            kw = tuple(kw.strip('"') for kw in self.soft_keywords)
+            self.print(f"SOFT_KEYWORDS = {kw}")
 
         trailer = self.grammar.metas.get("trailer", MODULE_SUFFIX.format(class_name=cls_name))
         if trailer is not None:

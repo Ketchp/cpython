@@ -59,8 +59,8 @@ def main() -> None:
     gen.collect_rules()
 
     with open(args.keyword_file, 'w') as thefile:
-        all_keywords = sorted(list(gen.keywords.keys()))
-        all_soft_keywords = sorted(gen.soft_keywords)
+        all_keywords = sorted(gen.keywords)
+        all_soft_keywords = sorted(kw.strip('"') for kw in gen.soft_keywords)
 
         keywords = "" if not all_keywords else "    " + ",\n    ".join(map(repr, all_keywords))
         soft_keywords = (
