@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import (
-    AbstractSet,
     Any,
     Iterable,
     Iterator,
@@ -44,14 +43,14 @@ class Grammar:
         return "\n".join(str(rule) for name, rule in self.rules.items())
 
     def __repr__(self) -> str:
-        lines = ["Grammar("]
-        lines.append("  [")
-        for rule in self.rules.values():
-            lines.append(f"    {repr(rule)},")
-        lines.append("  ],")
-        lines.append("  {repr(list(self.metas.items()))}")
-        lines.append(")")
-        return "\n".join(lines)
+        return "\n".join((
+            "Grammar(",
+            "  [",
+            *(f"    {repr(rule)}," for rule in self.rules.values()),
+            "  ],",
+            f"  {repr(list(self.metas.items()))}",
+            ")",
+        ))
 
     def __iter__(self) -> Iterator[Rule]:
         yield from self.rules.values()
@@ -61,7 +60,19 @@ class Grammar:
 SIMPLE_STR = True
 
 
-class Rule:
+class InitComment:
+    def __init__(self, comment: Optional[str] = None):
+        self.comment = comment or self._create_comment()
+
+    def __str__(self) -> str:
+        return self.comment
+
+    def _create_comment(self) -> str:
+        raise NotImplementedError("Subclass must implement _create_comment method")
+
+
+
+class Rule(InitComment):
     def __init__(self, name: str, type: Optional[str], rhs: Rhs, memo: Optional[object] = None):
         self.name = name
         self.type = type
@@ -69,6 +80,7 @@ class Rule:
         self.memo = bool(memo)
         self.left_recursive = False
         self.leader = False
+        super().__init__()
 
     def is_loop(self) -> bool:
         return self.name.startswith("_loop")
@@ -76,7 +88,7 @@ class Rule:
     def is_gather(self) -> bool:
         return self.name.startswith("_gather")
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         if SIMPLE_STR or self.type is None:
             res = f"{self.name}: {self.rhs}"
         else:
@@ -106,11 +118,12 @@ class Rule:
         return rhs
 
 
-class Leaf:
-    def __init__(self, value: str):
+class Leaf(InitComment):
+    def __init__(self, value: str, comment: Optional[str] = None):
         self.value = value
+        super().__init__(comment)
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         return self.value
 
     def __iter__(self) -> Iterable[str]:
@@ -120,10 +133,10 @@ class Leaf:
 class NameLeaf(Leaf):
     """The value is the name."""
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         if self.value == "ENDMARKER":
             return "$"
-        return super().__str__()
+        return super()._create_comment()
 
     def __repr__(self) -> str:
         return f"NameLeaf({self.value!r})"
@@ -136,12 +149,13 @@ class StringLeaf(Leaf):
         return f"StringLeaf({self.value!r})"
 
 
-class Rhs:
+class Rhs(InitComment):
     def __init__(self, alts: List[Alt]):
         self.alts = alts
         self.memo: Optional[Tuple[Optional[str], str]] = None
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         return " | ".join(str(alt) for alt in self.alts)
 
     def __repr__(self) -> str:
@@ -155,18 +169,16 @@ class Rhs:
         if len(self.alts) != 1 or len(self.alts[0].items) != 1:
             return False
         # If the alternative has an action we cannot inline
-        if getattr(self.alts[0], "action", None) is not None:
-            return False
-        return True
+        return self.alts[0].action is None
 
 
-class Alt:
-    def __init__(self, items: List[NamedItem], *, icut: int = -1, action: Optional[str] = None):
+class Alt(InitComment):
+    def __init__(self, items: List[NamedItem], *, action: Optional[str] = None):
         self.items = items
-        self.icut = icut
         self.action = action
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         core = " ".join(str(item) for item in self.items)
         if not SIMPLE_STR and self.action:
             return f"{core} {{ {self.action} }}"
@@ -175,8 +187,6 @@ class Alt:
 
     def __repr__(self) -> str:
         args = [repr(self.items)]
-        if self.icut >= 0:
-            args.append(f"icut={self.icut}")
         if self.action:
             args.append(f"action={self.action!r}")
         return f"Alt({', '.join(args)})"
@@ -185,13 +195,14 @@ class Alt:
         yield from self.items
 
 
-class NamedItem:
+class NamedItem(InitComment):
     def __init__(self, name: Optional[str], item: Item, type: Optional[str] = None):
         self.name = name
         self.item = item
         self.type = type
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         if not SIMPLE_STR and self.name:
             return f"{self.name}={self.item}"
         else:
@@ -204,24 +215,29 @@ class NamedItem:
         yield self.item
 
 
-class Forced:
+class Forced(InitComment):
     def __init__(self, node: Plain):
         self.node = node
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         return f"&&{self.node}"
 
     def __iter__(self) -> Iterator[Plain]:
         yield self.node
 
 
-class Lookahead:
+class Lookahead(InitComment):
     def __init__(self, node: Plain, sign: str):
         self.node = node
         self.sign = sign
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         return f"{self.sign}{self.node}"
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.node!r})"
 
     def __iter__(self) -> Iterator[Plain]:
         yield self.node
@@ -231,29 +247,22 @@ class PositiveLookahead(Lookahead):
     def __init__(self, node: Plain):
         super().__init__(node, "&")
 
-    def __repr__(self) -> str:
-        return f"PositiveLookahead({self.node!r})"
-
 
 class NegativeLookahead(Lookahead):
     def __init__(self, node: Plain):
         super().__init__(node, "!")
 
-    def __repr__(self) -> str:
-        return f"NegativeLookahead({self.node!r})"
 
-
-class Opt:
+class Opt(InitComment):
     def __init__(self, node: Item):
         self.node = node
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         s = str(self.node)
-        # TODO: Decide whether to use [X] or X? based on type of X
-        if " " in s:
-            return f"[{s}]"
-        else:
-            return f"{s}?"
+        if isinstance(s, Group):
+            s = s[1:-1]  # strip '(' and ')'
+        return f"[{s}]"
 
     def __repr__(self) -> str:
         return f"Opt({self.node!r})"
@@ -262,41 +271,29 @@ class Opt:
         yield self.node
 
 
-class Repeat:
+class Repeat(InitComment):
     """Shared base class for x* and x+."""
 
     def __init__(self, node: Plain):
         self.node = node
         self.memo: Optional[Tuple[Optional[str], str]] = None
+        super().__init__()
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.node!r})"
 
     def __iter__(self) -> Iterator[Plain]:
         yield self.node
 
 
 class Repeat0(Repeat):
-    def __str__(self) -> str:
-        s = str(self.node)
-        # TODO: Decide whether to use (X)* or X* based on type of X
-        if " " in s:
-            return f"({s})*"
-        else:
-            return f"{s}*"
-
-    def __repr__(self) -> str:
-        return f"Repeat0({self.node!r})"
+    def _create_comment(self) -> str:
+        return f"{self.node}*"
 
 
 class Repeat1(Repeat):
-    def __str__(self) -> str:
-        s = str(self.node)
-        # TODO: Decide whether to use (X)+ or X+ based on type of X
-        if " " in s:
-            return f"({s})+"
-        else:
-            return f"{s}+"
-
-    def __repr__(self) -> str:
-        return f"Repeat1({self.node!r})"
+    def _create_comment(self) -> str:
+        return f"{self.node}+"
 
 
 class Gather(Repeat):
@@ -304,18 +301,19 @@ class Gather(Repeat):
         self.separator = separator
         super().__init__(node)
 
-    def __str__(self) -> str:
-        return f"{self.separator!s}.{self.node!s}+"
+    def _create_comment(self) -> str:
+        return f"{self.separator}.{self.node}+"
 
     def __repr__(self) -> str:
         return f"Gather({self.separator!r}, {self.node!r})"
 
 
-class Group:
+class Group(InitComment):
     def __init__(self, rhs: Rhs):
         self.rhs = rhs
+        super().__init__()
 
-    def __str__(self) -> str:
+    def _create_comment(self) -> str:
         return f"({self.rhs})"
 
     def __repr__(self) -> str:
@@ -325,26 +323,15 @@ class Group:
         yield self.rhs
 
 
-class Cut:
-    def __init__(self) -> None:
-        pass
+class Cut(InitComment):
+    def _create_comment(self) -> str:
+        return "~"
 
     def __repr__(self) -> str:
         return f"Cut()"
 
-    def __str__(self) -> str:
-        return f"~"
-
     def __iter__(self) -> Iterator[Tuple[str, str]]:
         yield from ()
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Cut):
-            return NotImplemented
-        return True
-
-    def initial_names(self) -> AbstractSet[str]:
-        return set()
 
 
 Plain = Union[Leaf, Group]

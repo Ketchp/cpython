@@ -147,7 +147,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def rule(self) -> Optional[Rule]:
-        # rule: rulename memoflag? ":" alts NEWLINE INDENT more_alts DEDENT | rulename memoflag? ":" NEWLINE INDENT more_alts DEDENT | rulename memoflag? ":" alts NEWLINE
+        # rule: rulename [memoflag] ":" alts NEWLINE INDENT more_alts DEDENT | rulename [memoflag] ":" NEWLINE INDENT more_alts DEDENT | rulename [memoflag] ":" alts NEWLINE
         mark = self._mark()
         if (
             (rulename := self.rulename())
@@ -575,7 +575,7 @@ class GeneratedParser(Parser):
 
     @memoize
     def target_atom(self) -> Optional[str]:
-        # target_atom: "{" ~ target_atoms? "}" | "[" ~ target_atoms? "]" | NAME "*" | NAME | NUMBER | STRING | "?" | ":" | !"}" !"]" OP
+        # target_atom: "{" ~ [target_atoms] "}" | "[" ~ [target_atoms] "]" | NAME "*" | NAME | NUMBER | STRING | "?" | ":" | !"}" !"]" OP
         mark = self._mark()
         cut = False
         if (

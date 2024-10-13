@@ -1,6 +1,16 @@
 import os.path
 import token
-from typing import IO, Any, Dict, Optional, Sequence, Set, Text, Tuple
+from typing import (
+    Any,
+    Dict,
+    IO,
+    NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Text,
+)
 
 from pegen import grammar
 from pegen.grammar import (
@@ -10,6 +20,7 @@ from pegen.grammar import (
     Gather,
     GrammarVisitor,
     Group,
+    Leaf,
     Lookahead,
     NamedItem,
     NameLeaf,
@@ -105,10 +116,18 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if name in ("NEWLINE", "DEDENT", "INDENT", "ENDMARKER"):
             # Avoid using names that can be Python keywords
             return "_" + name.lower(), f"self.expect({name!r})"
+        if name.startswith("_loop0"):
+            return name, f"self.{name}(),"  # comma to force match
         return name, f"self.{name}()"
 
     def visit_StringLeaf(self, node: StringLeaf) -> Tuple[str, str]:
         return "literal", f"self.expect({node.value})"
+
+    def _raise_not_implemented(self, msg: str) -> NoReturn:
+        raise NotImplementedError(
+            msg + " can not be used in PythonCallMakerVisitor. "
+                + "Use TransformerVisitor to decompose rule first."
+        )
 
     def visit_Rhs(self, node: Rhs) -> Tuple[Optional[str], str]:
         if node in self.cache:
@@ -116,8 +135,7 @@ class PythonCallMakerVisitor(GrammarVisitor):
         if len(node.alts) == 1 and len(node.alts[0].items) == 1:
             self.cache[node] = self.visit(node.alts[0].items[0])
         else:
-            name = self.gen.artificial_rule_from_rhs(node)
-            self.cache[node] = name, f"self.{name}()"
+            self._raise_not_implemented("Rhs with more items")
         return self.cache[node]
 
     def visit_NamedItem(self, node: NamedItem) -> Tuple[Optional[str], str]:
@@ -151,26 +169,14 @@ class PythonCallMakerVisitor(GrammarVisitor):
         else:
             return "opt", f"{call},"
 
-    def visit_Repeat0(self, node: Repeat0) -> Tuple[str, str]:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_repeat(node.node, False)
-        self.cache[node] = name, f"self.{name}(),"  # Also a trailing comma!
-        return self.cache[node]
+    def visit_Repeat0(self, node: Repeat0) -> NoReturn:
+        self._raise_not_implemented("Repeat0")
 
-    def visit_Repeat1(self, node: Repeat1) -> Tuple[str, str]:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_repeat(node.node, True)
-        self.cache[node] = name, f"self.{name}()"  # But no trailing comma here!
-        return self.cache[node]
+    def visit_Repeat1(self, node: Repeat1) -> NoReturn:
+        self._raise_not_implemented("Repeat1")
 
-    def visit_Gather(self, node: Gather) -> Tuple[str, str]:
-        if node in self.cache:
-            return self.cache[node]
-        name = self.gen.artificial_rule_from_gather(node)
-        self.cache[node] = name, f"self.{name}()"  # No trailing comma here either!
-        return self.cache[node]
+    def visit_Gather(self, node: Gather) -> NoReturn:
+        self._raise_not_implemented("Gather")
 
     def visit_Group(self, node: Group) -> Tuple[Optional[str], str]:
         return self.visit(node.rhs)
@@ -179,14 +185,16 @@ class PythonCallMakerVisitor(GrammarVisitor):
         return "cut", "True"
 
     def visit_Forced(self, node: Forced) -> Tuple[str, str]:
-        if isinstance(node.node, Group):
-            _, val = self.visit(node.node.rhs)
-            return "forced", f"self.expect_forced({val}, '''({node.node.rhs!s})''')"
-        else:
+        if isinstance(node.node, Leaf):
+            _, val = self.visit(node.node)
+            expected = str(node.node).replace("'", "\\'")
+            if node.node.value.startswith("_tmp"):
+                expected = f"({expected})"
             return (
                 "forced",
-                f"self.expect_forced(self.expect({node.node.value}), {node.node.value!r})",
+                f"self.expect_forced({val}, '{expected}')",
             )
+        self._raise_not_implemented("Forced(Group)")
 
 
 class PythonParserGenerator(ParserGenerator, GrammarVisitor):

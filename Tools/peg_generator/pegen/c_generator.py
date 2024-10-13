@@ -3,7 +3,7 @@ import os.path
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import IO, Any, Callable, Dict, List, Optional, Set, Text, Tuple
+from typing import IO, Any, Callable, Dict, List, Optional, Set, Text, Tuple, NoReturn
 
 from pegen import grammar
 from pegen.grammar import (
@@ -13,7 +13,6 @@ from pegen.grammar import (
     Gather,
     GrammarVisitor,
     Group,
-    Leaf,
     Lookahead,
     NamedItem,
     NameLeaf,
@@ -258,33 +257,32 @@ class CCallMakerVisitor(GrammarVisitor):
         return self.lookahead_call_helper(node, 0)
 
     def visit_Forced(self, node: Forced) -> FunctionCall:
-        call = self.generate_call(node.node)
-        if isinstance(node.node, Leaf):
-            assert isinstance(node.node, Leaf)
+        if isinstance(node.node, StringLeaf):
             val = ast.literal_eval(node.node.value)
             assert val in self.exact_tokens, f"{node.node.value} is not a known literal"
-            type = self.exact_tokens[val]
+            macro = self.name_to_macro(val)
             return FunctionCall(
                 assigned_variable="_literal",
                 function=f"_PyPegen_expect_forced_token",
-                arguments=["p", type, f'"{val}"'],
+                arguments=["p", macro, f'"{val}"'],
                 nodetype=NodeTypes.GENERIC_TOKEN,
                 return_type="Token *",
                 comment=f"forced_token='{val}'",
             )
-        if isinstance(node.node, Group):
-            call = self.visit(node.node.rhs)
+        if isinstance(node.node, NameLeaf):
+            call = self.visit(node.node)
             call.assigned_variable = None
             call.comment = None
             return FunctionCall(
                 assigned_variable="_literal",
                 function=f"_PyPegen_expect_forced_result",
-                arguments=["p", str(call), f'"{node.node.rhs!s}"'],
+                arguments=["p", str(call), f'"{node.node}"'],
                 return_type="void *",
-                comment=f"forced_token=({node.node.rhs!s})",
+                comment=f"forced_token=({node.node})",
             )
-        else:
-            raise NotImplementedError(f"Forced tokens don't work with {node.node} nodes")
+        if isinstance(node.node, Group):
+            self._raise_not_implemented("Forced group")
+        raise NotImplementedError(f"Forced tokens don't work with {node.node} nodes")
 
     def visit_Opt(self, node: Opt) -> FunctionCall:
         call = self.generate_call(node.node)
@@ -319,39 +317,25 @@ class CCallMakerVisitor(GrammarVisitor):
             comment=node_str,
         )
 
+    def _raise_not_implemented(self, msg: str) -> NoReturn:
+        raise NotImplementedError(
+            msg + " can not be used in CCallMakerVisitor."
+                + " Use TransformerVisitor to decompose rule first."
+        )
+
     def visit_Rhs(self, node: Rhs) -> FunctionCall:
         if node.can_be_inlined:
             return self.generate_call(node.alts[0].items[0])
+        self._raise_not_implemented("Non-inlinable Rhs")
 
-        return self._generate_artificial_rule_call(
-            node,
-            "rhs",
-            lambda: self.gen.artificial_rule_from_rhs(node),
-        )
+    def visit_Repeat0(self, node: Repeat0) -> NoReturn:
+        self._raise_not_implemented("Repeat0")
 
-    def visit_Repeat0(self, node: Repeat0) -> FunctionCall:
-        return self._generate_artificial_rule_call(
-            node,
-            "repeat0",
-            lambda: self.gen.artificial_rule_from_repeat(node.node, is_repeat1=False),
-            "asdl_seq *",
-        )
+    def visit_Repeat1(self, node: Repeat1) -> NoReturn:
+        self._raise_not_implemented("Repeat1")
 
-    def visit_Repeat1(self, node: Repeat1) -> FunctionCall:
-        return self._generate_artificial_rule_call(
-            node,
-            "repeat1",
-            lambda: self.gen.artificial_rule_from_repeat(node.node, is_repeat1=True),
-            "asdl_seq *",
-        )
-
-    def visit_Gather(self, node: Gather) -> FunctionCall:
-        return self._generate_artificial_rule_call(
-            node,
-            "gather",
-            lambda: self.gen.artificial_rule_from_gather(node),
-            "asdl_seq *",
-        )
+    def visit_Gather(self, node: Gather) -> NoReturn:
+        self._raise_not_implemented("Gather")
 
     def visit_Group(self, node: Group) -> FunctionCall:
         return self.generate_call(node.rhs)

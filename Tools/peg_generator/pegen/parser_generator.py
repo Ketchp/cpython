@@ -2,6 +2,7 @@ import ast
 import contextlib
 import re
 from abc import abstractmethod
+from functools import wraps
 from typing import (
     IO,
     AbstractSet,
@@ -11,10 +12,13 @@ from typing import (
     Iterator,
     List,
     Optional,
+    ParamSpec,
     Set,
     Text,
     Tuple,
+    TypeVar,
     Union,
+    Callable,
 )
 
 from pegen import sccutils
@@ -31,13 +35,18 @@ from pegen.grammar import (
     NamedItem,
     NameLeaf,
     Opt,
-    Plain,
+    Repeat,
     Repeat0,
     Repeat1,
     Rhs,
     Rule,
     StringLeaf,
+    Item,
 )
+
+
+param_T = ParamSpec("param_T")
+return_T = TypeVar("return_T")
 
 
 class RuleCollectorVisitor(GrammarVisitor):
@@ -85,6 +94,135 @@ class RuleCheckingVisitor(GrammarVisitor):
         if node.name and node.name.startswith("_"):
             raise GrammarError(f"Variable names cannot start with underscore: '{node.name}'")
         self.visit(node.item)
+
+
+class TransformerVisitor(GrammarVisitor):
+    """Transforms repeat/gather/group rules into simpler ones."""
+    def __init__(self, rules: Dict[str, Rule]):
+        self.rules = rules
+        self._artificial_rule_cache: Dict[str, NameLeaf] = {}
+        self._counter = 0
+
+    def trivial_visit_wrapper(self, attr: str = '') -> Callable[[Item], Item]:
+        def visit_function(node: Item) -> Item:
+            if attr:
+                setattr(node, attr, self.visit(getattr(node, attr)))
+            return node
+        return visit_function
+
+    def __getattr__(self, key: str) -> Callable[[Item], Item]:
+        leaf_visit = self.trivial_visit_wrapper()
+        item_visit = self.trivial_visit_wrapper('item')
+        node_visit = self.trivial_visit_wrapper('node')
+
+        mapping = {
+            'Cut': leaf_visit,
+            'NameLeaf': leaf_visit,
+            'StringLeaf': leaf_visit,
+
+            'Opt': node_visit,
+            'Forced': node_visit,
+            'PositiveLookahead': node_visit,
+            'NegativeLookahead': node_visit,
+
+            'NamedItem': item_visit,
+        }
+
+        if key.startswith('visit_'):
+            key = key.removeprefix('visit_')
+            if key in mapping:
+                return mapping[key]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{key}'")
+
+    def visit_Rule(self, rule: Rule) -> Rule:
+        # flatten used for Groups as single Rule alt
+        rule.rhs = self.visit(rule.flatten(), is_rule_rhs=True)
+        return rule
+
+    def visit_Alt(self, node: Alt) -> Alt:
+        node.items = [self.visit(item) for item in node.items]
+        return node
+
+    def visit_Rhs(self, rhs: Rhs, is_rule_rhs: bool = False) -> Union[Rhs | NameLeaf]:
+        if is_rule_rhs or rhs.can_be_inlined:
+            rhs.alts = [self.visit(alt) for alt in rhs.alts]
+            return rhs
+        return self._artificial_rule_from_rhs(rhs)
+
+    def visit_Repeat0(self, node: Repeat0) -> NameLeaf:
+        return self._artificial_rule_from_repeat(node, is_repeat1=False)
+
+    def visit_Repeat1(self, node: Repeat0) -> NameLeaf:
+        return self._artificial_rule_from_repeat(node, is_repeat1=True)
+
+    def visit_Gather(self, node: Gather) -> NameLeaf:
+        return self._artificial_rule_from_gather(node)
+
+    def visit_Group(self, group: Group) -> NameLeaf:
+        return self.visit(group.rhs)   # groups always create new rule
+
+    @staticmethod
+    def _rule_cached(func: Callable[param_T, return_T]) -> Callable[param_T, return_T]:
+        """Make sure artificial rules are not duplicated."""
+        @wraps(func)
+        def inner(self, node, *args, **kwargs) -> return_T:
+            key = (type(node), str(node))
+
+            if key in self._artificial_rule_cache:
+                return self._artificial_rule_cache[key]
+
+            ret = func(self, node, *args, **kwargs)
+            self._artificial_rule_cache[key] = ret
+            return ret
+        return inner
+
+    @_rule_cached
+    def _artificial_rule_from_rhs(self, rhs: Rhs) -> NameLeaf:
+        self._counter += 1
+        name = f"_tmp_{self._counter}"  # TODO: Pick a nicer name.
+        self.rules[name] = Rule(name, None, rhs)
+        return NameLeaf(name, comment=str(rhs))
+
+    @_rule_cached
+    def _artificial_rule_from_repeat(self, node: Repeat, is_repeat1: bool) -> NameLeaf:
+        self._counter += 1
+        if is_repeat1:
+            prefix = "_loop1_"
+        else:
+            prefix = "_loop0_"
+        name = f"{prefix}{self._counter}"
+        self.rules[name] = Rule(
+            name,
+            None,
+            Rhs([Alt([NamedItem(None, node.node)])]),
+        )
+        return NameLeaf(name, comment=str(node))
+
+    @_rule_cached
+    def _artificial_rule_from_gather(self, node: Gather) -> NameLeaf:
+        self._counter += 1
+        extra_function_name = f"_loop0_{self._counter}"
+        extra_function_alt = Alt(
+            [NamedItem(None, node.separator), NamedItem("elem", node.node)],
+            action="elem",
+        )
+        self.rules[extra_function_name] = Rule(
+            extra_function_name,
+            None,
+            Rhs([extra_function_alt]),
+        )
+
+        self._counter += 1
+        name = f"_gather_{self._counter}"
+        alt = Alt(
+            [NamedItem("elem", node.node), NamedItem("seq", NameLeaf(extra_function_name))],
+        )
+        self.rules[name] = Rule(
+            name,
+            None,
+            Rhs([alt]),
+        )
+        return NameLeaf(name, comment=str(node))
 
 
 class ParserGenerator:
@@ -153,7 +291,8 @@ class ParserGenerator:
         for rule in self.all_rules.values():
             keyword_collector.visit(rule)
 
-        rule_collector = RuleCollectorVisitor(self.rules, self.callmakervisitor)
+        transformer = TransformerVisitor(self.all_rules)
+        rule_collector = RuleCollectorVisitor(self.all_rules, self.callmakervisitor)
         done: Set[str] = set()
         while True:
             computed_rules = list(self.all_rules)
@@ -162,51 +301,12 @@ class ParserGenerator:
                 break
             done = set(self.all_rules)
             for rulename in todo:
+                transformer.visit(self.all_rules[rulename])
                 rule_collector.visit(self.all_rules[rulename])
 
     def keyword_type(self) -> int:
         self.keyword_counter += 1
         return self.keyword_counter
-
-    def artificial_rule_from_rhs(self, rhs: Rhs) -> str:
-        self.counter += 1
-        name = f"_tmp_{self.counter}"  # TODO: Pick a nicer name.
-        self.all_rules[name] = Rule(name, None, rhs)
-        return name
-
-    def artificial_rule_from_repeat(self, node: Plain, is_repeat1: bool) -> str:
-        self.counter += 1
-        if is_repeat1:
-            prefix = "_loop1_"
-        else:
-            prefix = "_loop0_"
-        name = f"{prefix}{self.counter}"
-        self.all_rules[name] = Rule(name, None, Rhs([Alt([NamedItem(None, node)])]))
-        return name
-
-    def artificial_rule_from_gather(self, node: Gather) -> str:
-        self.counter += 1
-        extra_function_name = f"_loop0_{self.counter}"
-        extra_function_alt = Alt(
-            [NamedItem(None, node.separator), NamedItem("elem", node.node)],
-            action="elem",
-        )
-        self.all_rules[extra_function_name] = Rule(
-            extra_function_name,
-            None,
-            Rhs([extra_function_alt]),
-        )
-        self.counter += 1
-        name = f"_gather_{self.counter}"
-        alt = Alt(
-            [NamedItem("elem", node.node), NamedItem("seq", NameLeaf(extra_function_name))],
-        )
-        self.all_rules[name] = Rule(
-            name,
-            None,
-            Rhs([alt]),
-        )
-        return name
 
     def dedupe(self, name: str) -> str:
         origname = name
