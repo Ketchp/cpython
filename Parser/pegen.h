@@ -140,6 +140,7 @@ int _PyPegen_lookahead(int, void *(func)(Parser *), Parser *);
 Token *_PyPegen_expect_token(Parser *p, int type);
 void* _PyPegen_expect_forced_result(Parser *p, void* result, const char* expected);
 Token *_PyPegen_expect_forced_token(Parser *p, int type, const char* expected);
+int _PyPegen_peek_soft_keyword(Parser *p, const char *keyword);
 expr_ty _PyPegen_expect_soft_keyword(Parser *p, const char *keyword);
 expr_ty _PyPegen_soft_keyword_token(Parser *p);
 expr_ty _PyPegen_fstring_middle_token(Parser* p);

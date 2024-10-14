@@ -464,6 +464,29 @@ _PyPegen_expect_forced_token(Parser *p, int type, const char* expected) {
     return t;
 }
 
+int
+_PyPegen_peek_soft_keyword(Parser *p, const char *keyword) {
+    if (p->mark == p->fill) {
+        if (_PyPegen_fill_token(p) < 0) {
+            p->error_indicator = 1;
+            return 0;
+        }
+    }
+    Token *t = p->tokens[p->mark];
+    if (t->type != NAME) {
+        return 0;
+    }
+    const char *s = PyBytes_AsString(t->bytes);
+    if (!s) {
+        p->error_indicator = 1;
+        return 0;
+    }
+    if (strcmp(s, keyword) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
 expr_ty
 _PyPegen_expect_soft_keyword(Parser *p, const char *keyword)
 {

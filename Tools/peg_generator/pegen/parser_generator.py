@@ -242,6 +242,7 @@ class ParserGenerator:
             checker.visit(rule)
         self.file = file
         self.level = 0
+        self.at_newline = False
         self.first_graph, self.first_sccs = compute_left_recursives(self.rules)
         self.counter = 0  # For name_rule()/name_loop()
         self.keyword_counter = 499  # For keyword_type()
@@ -275,16 +276,12 @@ class ParserGenerator:
         finally:
             self.level -= 1
 
-    def print(self, *args: object) -> None:
-        if not args:
-            print(file=self.file)
-        else:
-            print("    " * self.level, end="", file=self.file)
-            print(*args, file=self.file)
-
-    def printblock(self, lines: str) -> None:
-        for line in lines.splitlines():
-            self.print(line)
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        kwargs['file'] = self.file
+        if self.at_newline and args:
+            print(" " * 4 * self.level, end="", file=self.file)
+        print(*args, **kwargs)
+        self.at_newline = kwargs.get('end', '\n') == '\n'
 
     def collect_rules(self) -> None:
         keyword_collector = KeywordCollectorVisitor(self, self.keywords, self.soft_keywords)
